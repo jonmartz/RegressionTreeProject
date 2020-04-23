@@ -8,12 +8,13 @@ from category_encoders import OneHotEncoder
 
 def get_best_split(data, data_encoded, target_col, categorical_cols, regression_algorithm):
     best_split = None
-    for feature in data.columns:
+    for feature in data.columns.drop(target_col):
         feature_values, counts = np.unique(data[feature], return_counts=True)
 
         # CATEGORICAL COLUMN #
         if feature in categorical_cols:
             data_splits, data_encoded_splits, regression_models, MSEs = [], [], [], []
+            split_names = feature_values
             for feature_value in feature_values:
                 data_split = data.loc[data[feature] == feature_value]
                 data_splits.append(data_split.reset_index(drop=True))
@@ -22,15 +23,18 @@ def get_best_split(data, data_encoded, target_col, categorical_cols, regression_
                 regression_model, MSE = fit_regression_model(data_encoded_split, target_col, regression_algorithm)
                 regression_models.append(regression_model)
                 MSEs.append(MSE)
-            weighted_MSE = np.dot(MSEs, counts)
+            # weighted_MSE = np.dot(MSEs, counts)
+            weighted_MSE = np.average(MSEs, weights=counts)
             if best_split is None or weighted_MSE < best_split[-1]:  # if weighted_MSE is new best
-                best_split = [feature, feature_values, data_splits, data_encoded_splits, regression_models, MSEs,
+                best_split = [feature, split_names, data_splits, data_encoded_splits, regression_models, MSEs,
                               weighted_MSE]
         # NUMERICAL COLUMN #
         else:
             for feature_value in feature_values:
                 data_split_left = data.loc[data[feature] < feature_value]
                 data_split_right = data.loc[data[feature] >= feature_value]
+                if 0 in [len(data_split_left), len(data_split_right)]:
+                    continue  # if no splitting was actually performed
                 data_splits = [data_split_left.reset_index(drop=True), data_split_right.reset_index(drop=True)]
                 data_encoded_split_left = data_encoded.loc[data_split_left.index].reset_index(drop=True)
                 data_encoded_split_right = data_encoded.loc[data_split_right.index].reset_index(drop=True)
@@ -41,11 +45,12 @@ def get_best_split(data, data_encoded, target_col, categorical_cols, regression_
                                                                        regression_algorithm)
                 regression_models = [regression_model_left, regression_model_right]
                 MSEs = [MSE_left, MSE_right]
-                weighted_MSE = np.dot(MSEs, [len(data_split_left), len(data_split_right)])
+                # weighted_MSE = np.dot(MSEs, [len(data_split_left), len(data_split_right)])
+                weighted_MSE = np.average(MSEs, weights=[len(data_split_left), len(data_split_right)])
                 if best_split is None or weighted_MSE < best_split[-1]:  # if weighted_MSE is new best
-                    best_split = [feature, feature_values, data_splits, data_encoded_splits, regression_models, MSEs,
+                    split_names = ['<%s' % feature_value, '>=%s' % feature_value]
+                    best_split = [feature, split_names, data_splits, data_encoded_splits, regression_models, MSEs,
                                   weighted_MSE]
-
     return best_split
 
 
@@ -59,26 +64,28 @@ def fit_regression_model(data, target_col, regression_algorithm):
 
 
 def regression_tree(data, data_encoded, target_col, categorical_cols, min_instances_to_split, regression_algorithm,
-                    parent_regression_model=None, curr_regression_model=None, curr_MSE=None):
-
+                    parent_regression_model=None, curr_regression_model=None, curr_MSE=None, iteration=[1]):
     if len(data) < min_instances_to_split or len(np.unique(data[target_col])) == 1:  # stopping criteria
         return parent_regression_model
     if curr_regression_model is None:  # true only in tree's root
         curr_regression_model, curr_MSE = fit_regression_model(data_encoded, target_col, regression_algorithm)
 
+    print('iteration %d' % iteration[0])
+
     # get best split
     best_split = get_best_split(data, data_encoded, target_col, categorical_cols, regression_algorithm)
-    best_feature, split_names, data_splits, data_encoded_splits, regression_models, MSEs, weighted_MSE = best_split
+    feature, split_names, data_splits, data_encoded_splits, regression_models, MSEs, weighted_MSE = best_split
     if weighted_MSE > curr_MSE:  # if best split is worse than current node
         return curr_regression_model
 
     # perform split
-    node = {best_feature: {}}
+    node = {feature: {}}
     for i in range(len(data_splits)):
+        iteration[0] += 1
         child_node = regression_tree(data_splits[i], data_encoded_splits[i], target_col, categorical_cols,
                                      min_instances_to_split, regression_algorithm, curr_regression_model,
-                                     regression_models[i], MSEs[i])
-        node[best_feature][split_names[i]] = child_node  # add the child node to tree
+                                     regression_models[i], MSEs[i], iteration)
+        node[feature][split_names[i]] = child_node  # add the child node to tree
     return node
 
 
@@ -104,7 +111,7 @@ def predict(query, tree, default=1):
 
 def train_test_split(dataset, categorical_cols, train_fraction):
     dataset_encoded = OneHotEncoder(cols=categorical_cols, use_cat_names=True).fit_transform(dataset)
-    train_len = len(dataset) * train_fraction
+    train_len = int(len(dataset) * train_fraction)
     train_set = dataset.sample(n=train_len, random_state=1)
     train_set_encoded = dataset_encoded.loc[train_set.index].reset_index(drop=True)
     test_set = dataset.drop(train_set.index).reset_index(drop=True)
@@ -132,7 +139,7 @@ target_col = 'cnt'
 categorical_cols = []
 
 # model parameters
-min_instances_to_split = 5
+min_instances_to_split = 30
 regression_algorithm = linear_model.LinearRegression
 
 # train and test model
