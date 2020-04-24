@@ -169,11 +169,9 @@ train_set, train_set_encoded, test_set, test_set_encoded = train_test_split(data
 print('building tree...')
 tree_root = regression_tree(train_set, train_set_encoded, target_col, categorical_cols, min_samples_split,
                             regression_algorithm)
-# print('tree:')
-# pprint(tree_root)
 print('testing tree...')
 our_MSE = test(tree_root, test_set, test_set_encoded, target_col, categorical_cols)
 print('our MSE = %.5f' % our_MSE)
 sklearn_MSE = sklearn_test(train_set_encoded, test_set_encoded, target_col, min_samples_split)
 print('sklearn MSE = %.5f' % sklearn_MSE)
-print('our MSE is %.4f%% larger than sklearn MSE' % (our_MSE/sklearn_MSE - 1))
+print('our MSE is %.4f%% larger than sklearn MSE' % ((our_MSE/sklearn_MSE - 1) * 100))
