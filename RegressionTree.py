@@ -64,13 +64,11 @@ def fit_regression_model(data, target_col, regression_algorithm):
 
 
 def regression_tree(data, data_encoded, target_col, categorical_cols, min_instances_to_split, regression_algorithm,
-                    parent_regression_model=None, curr_regression_model=None, curr_MSE=None, iteration=[1]):
+                    parent_regression_model=None, curr_regression_model=None, curr_MSE=None):
     if len(data) < min_instances_to_split or len(np.unique(data[target_col])) == 1:  # stopping criteria
         return parent_regression_model
     if curr_regression_model is None:  # true only in tree's root
         curr_regression_model, curr_MSE = fit_regression_model(data_encoded, target_col, regression_algorithm)
-
-    print('iteration %d' % iteration[0])
 
     # get best split
     best_split = get_best_split(data, data_encoded, target_col, categorical_cols, regression_algorithm)
@@ -81,10 +79,9 @@ def regression_tree(data, data_encoded, target_col, categorical_cols, min_instan
     # perform split
     node = {feature: {}}
     for i in range(len(data_splits)):
-        iteration[0] += 1
         child_node = regression_tree(data_splits[i], data_encoded_splits[i], target_col, categorical_cols,
                                      min_instances_to_split, regression_algorithm, curr_regression_model,
-                                     regression_models[i], MSEs[i], iteration)
+                                     regression_models[i], MSEs[i])
         node[feature][split_names[i]] = child_node  # add the child node to tree
     return node
 
@@ -133,19 +130,22 @@ def test(tree, data, data_encoded):
     print('The prediction accuracy is: ', (np.sum(predicted["predicted"] == data["class"]) / len(data)) * 100, '%')
 
 
-# dataset settings
+# todo: choose dataset settings and model parameters
 dataset = pd.read_csv("datasets/bike_sharing.csv", usecols=['season', 'holiday', 'weekday', 'weathersit', 'cnt'])
 target_col = 'cnt'
 categorical_cols = []
-
-# model parameters
+train_fraction = 0.9
+# MODEL PARAMETERS REQUESTED IN ASSIGNMENT:
 min_instances_to_split = 30
 regression_algorithm = linear_model.LinearRegression
 
 # train and test model
-train_fraction = 0.9
 train_set, train_set_encoded, test_set, test_set_encoded = train_test_split(dataset, categorical_cols, train_fraction)
+print('building tree...')
 tree = regression_tree(train_set, train_set_encoded, target_col, categorical_cols, min_instances_to_split,
                        regression_algorithm)
+print('tree:')
 pprint(tree)
+print('\ntesting tree...')
+# todo: fix code for prediction
 test(tree, test_set, test_set_encoded)
