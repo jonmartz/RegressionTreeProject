@@ -2,13 +2,27 @@ import pandas as pd
 import numpy as np
 from sklearn import linear_model
 from sklearn.metrics import mean_squared_error
-from pprint import pprint
 from category_encoders import OneHotEncoder
 from sklearn.tree import DecisionTreeRegressor
 
 
 def regression_tree(data, data_encoded, target_col, categorical_cols, min_samples_split, regression_algorithm,
                     parent_regression_model=None, curr_regression_model=None, curr_MSE=None):
+    """
+    Our implementation of the regression tree. For numeric columns performs the best binary split and for categorical
+    columns splits by every possible category. Saves a regression model in each node in case that the test set
+    contains an instance with a category that wasn't present in the train set.
+    :param data: to be trained on, includes the target class.
+    :param data_encoded: one-hot-encoded of data
+    :param target_col: col to be predicted
+    :param categorical_cols: list of the column names of the categorical columns (previously identified automatically)
+    :param min_samples_split: minimum number of samples in node to perform a split
+    :param regression_algorithm: to put in every node
+    :param parent_regression_model: regression model from parent node, in case the created node has too few samples
+    :param curr_regression_model: regression model of current node sent by the parent who already computed it for MSE
+    :param curr_MSE: MSE obtained by curr_regression_model, sent by the parent who already computed it
+    :return: current node (first function call returns the tree's root)
+    """
     if len(data.index) < min_samples_split or len(np.unique(data[target_col])) == 1:  # stopping criteria
         return parent_regression_model
     if curr_regression_model is None:  # true only in tree's root
@@ -32,6 +46,24 @@ def regression_tree(data, data_encoded, target_col, categorical_cols, min_sample
 
 
 def get_best_split(data, data_encoded, target_col, categorical_cols, regression_algorithm):
+    """
+    Finds the best possible split from current node.
+    :param data: to be trained on, includes the target class.
+    :param data_encoded: one-hot-encoded of data
+    :param target_col: col to be predicted
+    :param categorical_cols: list of the column names of the categorical columns (previously identified automatically)
+    :param regression_algorithm: to put in every node
+    :return: a list containing:
+            [
+            feature = name of column selected for split,
+            split_names = string describing the feature value in each split path,
+            data_splits = data to be sent to each split path,
+            data_encoded_splits = one-hot-encoded version of data_splits,
+            regression_models = regression models to be sent to each split path,
+            MSEs = MSEs obtained from regression_models,
+            weighted_MSE = weighted average of the MSEs from each split path
+            ]
+    """
     best_split = None
     for feature in data.columns.drop(target_col):
         feature_values, counts = np.unique(data[feature], return_counts=True)
@@ -79,6 +111,13 @@ def get_best_split(data, data_encoded, target_col, categorical_cols, regression_
 
 
 def fit_regression_model(data, target_col, regression_algorithm):
+    """
+    Fits a regression model the implements regression_algorithm
+    :param data: one-hot-encoded of data to be trained on
+    :param target_col: col to be predicted
+    :param regression_algorithm: algorithm to implement for regression
+    :return: a list [fitted regression model, MSE obtained]
+    """
     x = data.drop(columns=[target_col])
     y = data[target_col]
     regression_model = regression_algorithm()
@@ -88,6 +127,17 @@ def fit_regression_model(data, target_col, regression_algorithm):
 
 
 def predict(node, data, data_encoded, target_col, categorical_cols):
+    """
+    Recursive implementation of querying a tree for predictions. To speed up the process, only one recursive call is
+    made for every split path relevant to the data, where all the data relevant to each split path is sent to the
+    child function call.
+    :param node: root of regression tree
+    :param data: to obtain predictions for, includes target class column
+    :param data_encoded: one-hot-encoded of data
+    :param target_col: col to be predicted
+    :param categorical_cols: list of the column names of the categorical columns (previously identified automatically)
+    :return: a list [target column, predicted target column], may not be in the same order as in original data
+    """
     y, y_pred = [], []
     if len(data.index) == 0:
         return y, y_pred
@@ -122,6 +172,13 @@ def predict(node, data, data_encoded, target_col, categorical_cols):
 
 
 def train_test_split(dataset, categorical_cols, train_fraction):
+    """
+    Splits the dataset into a train and a test set
+    :param dataset: data to be split
+    :param categorical_cols: list of the column names of the categorical columns (previously identified automatically)
+    :param train_fraction: portion of dataset to be used as train set
+    :return: a list [train set, one-hot-encoded train set, test set, one-hot-encoded test set]
+    """
     dataset_encoded = OneHotEncoder(cols=categorical_cols, use_cat_names=True).fit_transform(dataset)
     train_len = int(len(dataset.index) * train_fraction)
     train_set = dataset.sample(n=train_len, random_state=1)
@@ -132,46 +189,68 @@ def train_test_split(dataset, categorical_cols, train_fraction):
 
 
 def test(tree_root, data, data_encoded, target_col, categorical_cols):
-    simple_regression_MSE = fit_regression_model(data_encoded, target_col, regression_algorithm)[1]
-    print('simple logistic regression MSE = %.5f' % simple_regression_MSE)
+    """
+    Test the performance of a regression tree. All this does is perform the first recursive call of the
+    predict function.
+    :param tree_root: root of regression tree
+    :param data: to obtain predictions for, includes target class column
+    :param data_encoded: one-hot-encoded of data
+    :param target_col: col to be predicted
+    :param categorical_cols: list of the column names of the categorical columns (previously identified automatically)
+    :return: the MSE of the tree's predictions
+    """
     y, y_pred = predict(tree_root, data, data_encoded.drop(columns=target_col), target_col, categorical_cols)
     return mean_squared_error(y, y_pred)
 
 
-def sklearn_test(train_set, test_set, target_col, min_samples_split):
-    x_train = train_set.drop(columns=target_col)
-    y_train = train_set[target_col]
+def simple_and_sklearn_test(train_set, test_set, target_col, min_samples_split, regression_algorithm):
+    """
+    For comparing our tree's performance with a simple regression model, AKA a single-node (the root) regression tree,
+    and with sklearn's regression tree implementation that employs a regular linear regression model.
+    :param train_set: one-hot-encoded version of train set
+    :param test_set: one-hot-encoded version of test set
+    :param target_col: target class columns name
+    :param min_samples_split: minimum number of samples in node to perform a split
+    :param regression_algorithm: to be implemented by regression model
+    :return: a list [MSE of simple regression model, MSE of sklearn's tree]
+    """
     x_test = test_set.drop(columns=target_col)
     y_test = test_set[target_col]
-    tree = DecisionTreeRegressor(random_state=1)
-    # if i == 0:
-    #     tree = DecisionTreeRegressor(random_state=1)
-    # elif i == 1:
-    #     tree = DecisionTreeRegressor(min_samples_split=min_samples_split, random_state=1)
-    # else:
-    #     tree = DecisionTreeRegressor(min_samples_split=min_samples_split, min_samples_leaf=min_samples_split, random_state=1)
-    tree.fit(x_train, y_train)
-    y_pred = tree.predict(x_test)
-    return mean_squared_error(y_test, y_pred)
+
+    # train and test a simple regression model, AKA single node regression tree
+    simple_model = fit_regression_model(train_set_encoded, target_col, regression_algorithm)[0]
+    y_pred = simple_model.predict(x_test)
+    simple_MSE = mean_squared_error(y_test, y_pred)
+
+    # train and test sklearn's implementation of regression trees
+    sklearn_tree = DecisionTreeRegressor(random_state=1, min_samples_split=min_samples_split)
+    sklearn_tree.fit(train_set.drop(columns=target_col), train_set[target_col])
+    y_pred = sklearn_tree.predict(x_test)
+    sklearn_MSE = mean_squared_error(y_test, y_pred)
+
+    return simple_MSE, sklearn_MSE
 
 
-# todo: choose dataset settings and model parameters
-dataset = pd.read_csv("datasets/bike_sharing.csv", usecols=['season', 'holiday', 'weekday', 'weathersit', 'cnt'])
-target_col = 'cnt'
-categorical_cols = []
+# todo: choose dataset settings and model parameters here
+dataset = pd.read_csv("datasets/zoo.csv")
+target_col = 'class'
 train_fraction = 0.9
 # MODEL PARAMETERS REQUESTED IN ASSIGNMENT:
 min_samples_split = 30
 regression_algorithm = linear_model.LinearRegression
+# regression_algorithm = linear_model.SGDRegressor
+# regression_algorithm = linear_model.Ridge
 
 # train and test model
+categorical_cols = dataset.columns[[not np.issubdtype(i, np.number) for i in dataset.dtypes]].to_list()
 train_set, train_set_encoded, test_set, test_set_encoded = train_test_split(dataset, categorical_cols, train_fraction)
 print('building tree...')
 tree_root = regression_tree(train_set, train_set_encoded, target_col, categorical_cols, min_samples_split,
                             regression_algorithm)
-print('testing tree...')
 our_MSE = test(tree_root, test_set, test_set_encoded, target_col, categorical_cols)
-print('our MSE = %.5f' % our_MSE)
-sklearn_MSE = sklearn_test(train_set_encoded, test_set_encoded, target_col, min_samples_split)
+simple_MSE, sklearn_MSE = simple_and_sklearn_test(train_set_encoded, test_set_encoded, target_col, min_samples_split,
+                                                  regression_algorithm)
+print('simple regression MSE = %.5f' % simple_MSE)
 print('sklearn MSE = %.5f' % sklearn_MSE)
+print('our MSE = %.5f' % our_MSE)
 print('our MSE is %.4f%% larger than sklearn MSE' % ((our_MSE/sklearn_MSE - 1) * 100))
